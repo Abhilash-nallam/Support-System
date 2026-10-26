@@ -1,0 +1,100 @@
+service: support-system
+
+provider:
+  name: aws
+  region: ap-south-1
+  stage: ${opt:stage, 'prod'}
+  runtime: php-84-fpm
+  architecture: arm64
+  memorySize: 256
+  timeout: 15
+  logRetentionInDays: 7
+  environment:
+    TICKETS_TABLE: ${self:service}-${sls:stage}-tickets
+    REPLIES_TABLE: ${self:service}-${sls:stage}-replies
+    TELEGRAM_BOT_TOKEN: ${env:TELEGRAM_BOT_TOKEN}
+    TELEGRAM_WEBHOOK_SECRET: ${env:TELEGRAM_WEBHOOK_SECRET}
+    ADMIN_TELEGRAM_ID: ${env:ADMIN_TELEGRAM_ID}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:Scan
+          Resource:
+            - Fn::GetAtt: [SupportTicketsTable, Arn]
+            - Fn::GetAtt: [SupportRepliesTable, Arn]
+
+plugins:
+  - ./vendor/bref/bref
+
+package:
+  patterns:
+    - '!README.md'
+    - '!README-AWS.md'
+    - '!schema.sql'
+    - '!config.example.php'
+    - '!db.php'
+    - '!telegram.php'
+    - '!webhook.php'
+    - '!health.php'
+    - '!set-webhook.php'
+    - '!public/bitsresources-telegram-widget.html'
+    - '!tests/**'
+    - '!.git/**'
+    - '!.github/**'
+    - '!node_modules/**'
+    - '!vendor/bin/**'
+
+functions:
+  api:
+    handler: public/index.php
+    url: true
+
+resources:
+  Resources:
+    SupportTicketsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${sls:stage}-tickets
+        BillingMode: PROVISIONED
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+        AttributeDefinitions:
+          - AttributeName: ticket_code
+            AttributeType: S
+        KeySchema:
+          - AttributeName: ticket_code
+            KeyType: HASH
+        SSESpecification:
+          SSEEnabled: true
+    SupportRepliesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${sls:stage}-replies
+        BillingMode: PROVISIONED
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+        AttributeDefinitions:
+          - AttributeName: ticket_code
+            AttributeType: S
+          - AttributeName: reply_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: ticket_code
+            KeyType: HASH
+          - AttributeName: reply_id
+            KeyType: RANGE
+        SSESpecification:
+          SSEEnabled: true
+
+  Outputs:
+    TicketsTableName:
+      Value: ${self:service}-${sls:stage}-tickets
+    RepliesTableName:
+      Value: ${self:service}-${sls:stage}-replies
