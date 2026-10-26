@@ -42,6 +42,33 @@ function marshaler(): Marshaler {
 function ticketsTable(): string { return envRequired('TICKETS_TABLE'); }
 function repliesTable(): string { return envRequired('REPLIES_TABLE'); }
 
+function usersTable(): string { return envRequired('USERS_TABLE'); }
+
+function getUserProfile(string $chatId): ?array {
+    $result = ddb()->getItem([
+        'TableName' => usersTable(),
+        'Key' => ['user_chat_id' => ['S' => $chatId]],
+        'ConsistentRead' => true
+    ]);
+    return empty($result['Item']) ? null : marshaler()->unmarshalItem($result['Item']);
+}
+
+function saveUserProfile(string $chatId, string $rollNumber, array $user): void {
+    $now = gmdate('Y-m-d\\TH:i:s\\Z');
+    ddb()->putItem([
+        'TableName' => usersTable(),
+        'Item' => marshaler()->marshalItem([
+            'user_chat_id' => $chatId,
+            'roll_number' => $rollNumber,
+            'first_name' => cleanText((string)($user['first_name'] ?? ''), 80),
+            'last_name' => cleanText((string)($user['last_name'] ?? ''), 80),
+            'username' => cleanText((string)($user['username'] ?? ''), 80),
+            'created_at' => $now,
+            'updated_at' => $now
+        ])
+    ]);
+}
+
 function cleanText(string $s, int $max = 3500): string {
     $s = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/u', '', $s) ?? '';
     return function_exists('mb_substr') ? mb_substr($s, 0, $max, 'UTF-8') : substr($s, 0, $max);
