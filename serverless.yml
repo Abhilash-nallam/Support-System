@@ -12,6 +12,7 @@ provider:
   environment:
     TICKETS_TABLE: ${self:service}-${sls:stage}-tickets
     REPLIES_TABLE: ${self:service}-${sls:stage}-replies
+    USERS_TABLE: ${self:service}-${sls:stage}-users
     TELEGRAM_BOT_TOKEN: ${env:TELEGRAM_BOT_TOKEN}
     TELEGRAM_WEBHOOK_SECRET: ${env:TELEGRAM_WEBHOOK_SECRET}
     ADMIN_TELEGRAM_ID: ${env:ADMIN_TELEGRAM_ID}
@@ -24,9 +25,11 @@ provider:
             - dynamodb:PutItem
             - dynamodb:UpdateItem
             - dynamodb:Scan
+            - dynamodb:DeleteItem
           Resource:
             - Fn::GetAtt: [SupportTicketsTable, Arn]
             - Fn::GetAtt: [SupportRepliesTable, Arn]
+            - Fn::GetAtt: [SupportUsersTable, Arn]
 
 plugins:
   - ./vendor/bref/bref
@@ -95,8 +98,27 @@ resources:
         SSESpecification:
           SSEEnabled: true
 
+    SupportUsersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${sls:stage}-users
+        BillingMode: PROVISIONED
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+        AttributeDefinitions:
+          - AttributeName: user_chat_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: user_chat_id
+            KeyType: HASH
+        SSESpecification:
+          SSEEnabled: true
+
   Outputs:
     TicketsTableName:
       Value: ${self:service}-${sls:stage}-tickets
     RepliesTableName:
       Value: ${self:service}-${sls:stage}-replies
+    UsersTableName:
+      Value: ${self:service}-${sls:stage}-users
