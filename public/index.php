@@ -120,29 +120,39 @@ function handleTelegramMessage(array $m): void {
     if ($chatId === '' || $fromId === '' || $chatType !== 'private' || $text === '') return;
 
     if (preg_match('/^\/start(?:@\w+)?(?:\s|$)/i', $text)) {
-        sendText($chatId, "👋 Welcome to BitsResources Support!\n\nSend your question here. I'll create a ticket and notify the admin. You'll receive the reply in this chat.\n\nNever send passwords or OTPs.");
+        if (!isAdmin($fromId, $chatType)) {
+            $profile = getUserProfile($chatId);
+            if ($profile) {
+                sendText($chatId, "👋 Welcome to BitsResources Support!\n\nYour roll number: {$profile['roll_number']}\nSend your support issue as a message. Each request will be listed with its date and status.\n\nTo change your roll number, send /change_roll. Never send passwords or OTPs.");
+            } else {
+                sendText($chatId, "👋 Welcome to BitsResources Support!\n\nFirst, enter your BITSResources roll number (example: 24C31A66XX). You must enter it before sending a support issue.\n\nNever send passwords or OTPs.");
+            }
+        } else {
+            sendText($chatId, "Admin commands:\n/tickets - latest tickets first\n/reply TICKET_ID your message\n/close TICKET_ID");
+        }
+        return;
+    }
+    if (preg_match('/^\/change_roll(?:@\w+)?$/i', $text) && !isAdmin($fromId, $chatType)) {
+        ddb()->deleteItem(['TableName' => usersTable(), 'Key' => ['user_chat_id' => ['S' => $chatId]]]);
+        sendText($chatId, "Please enter your roll number (example: 24C31A66XX) to continue.");
         return;
     }
     if (preg_match('/^\/help(?:@\w+)?$/i', $text)) {
-        sendText($chatId, "BitsResources Support\n\nSend your issue as a message to create a ticket.\nUse /status BR-YYYYMMDD-ABC123 to check it.\nDo not send passwords or OTPs.");
+        sendText($chatId, "BitsResources Support\n\nEnter your roll number first, then send your issue.\nEach request appears with date and status; newest tickets are listed first.\nDo not send passwords or OTPs.");
         return;
     }
     if (preg_match('/^\/tickets(?:@\w+)?$/i', $text)) {
         if (!isAdmin($fromId, $chatType)) { sendText($chatId, 'Admin only command.'); return; }
-        $result = ddb()->scan([
-            'TableName' => ticketsTable(),
-            'FilterExpression' => '#st = :open',
-            'ExpressionAttributeNames' => ['#st' => 'status'],
-            'ExpressionAttributeValues' => [':open' => ['S' => 'open']],
-            'Limit' => 100
-        ]);
+        $result = ddb()->scan(['TableName' => ticketsTable(), 'Limit' => 100]);
         $rows = array_map(fn($i) => marshaler()->unmarshalItem($i), $result['Items'] ?? []);
-        usort($rows, fn($a, $b) => strcmp((string)($a['created_at'] ?? ''), (string)($b['created_at'] ?? '')));
+        usort($rows, fn($a, $b) => strcmp((string)($b['created_at'] ?? ''), (string)($a['created_at'] ?? '')));
         $rows = array_slice($rows, 0, 20);
-        if (!$rows) { sendText($chatId, '✅ No open tickets.'); return; }
+        if (!$rows) { sendText($chatId, 'No tickets yet.'); return; }
         $out = [];
-        foreach ($rows as $r) $out[] = $r['ticket_code'] . ' · ' . ($r['user_name'] ?: 'User') . "\n" . cleanText((string)$r['message'], 180);
-        sendText($chatId, "🗂 OPEN TICKETS\n\n" . implode("\n\n", $out));
+        foreach ($rows as $r) {
+            $out[] = "Roll: " . ($r['roll_number'] ?? 'Not recorded') . "\nDate: " . ($r['created_at'] ?? 'Unknown') . "\nStatus: " . strtoupper((string)($r['status'] ?? 'unknown')) . "\nTicket: " . $r['ticket_code'] . "\n" . cleanText((string)$r['message'], 180);
+        }
+        sendText($chatId, "🗂 LATEST SUPPORT TICKETS (newest first)\n\n" . implode("\n\n────────────\n\n", $out));
         return;
     }
     if (preg_match('/^\/reply(?:@\w+)?\s+(BR-\d{8}-[A-F0-9]{6})\s+([\s\S]+)$/i', $text, $x)) {
@@ -186,13 +196,26 @@ function handleTelegramMessage(array $m): void {
         return;
     }
     if (isAdmin($fromId, $chatType)) {
-        sendText($chatId, "Admin commands:\n/tickets\n/reply TICKET_ID your message\n/close TICKET_ID\n\nTest user flow from another Telegram account.");
+        sendText($chatId, "Admin commands:\n/tickets - latest tickets first with roll, date and status\n/reply TICKET_ID your message\n/close TICKET_ID");
+        return;
+    }
+
+    $profile = getUserProfile($chatId);
+    if (!$profile) {
+        $roll = strtoupper(preg_replace('/\\s+/', '', $text) ?? '');
+        if (!preg_match('/^[A-Z0-9]{8,12}$/', $roll)) {
+            sendText($chatId, "Please enter a valid roll number using 8–12 letters/numbers (example: 24C31A66XX).");
+            return;
+        }
+        saveUserProfile($chatId, $roll, $user);
+        sendText($chatId, "✅ Roll number saved: {$roll}\n\nNow send your support issue. Your requests will be recorded under this roll number with date and status.");
         return;
     }
 
     $body = cleanText($text);
     $name = trim(cleanText((string)($user['first_name'] ?? ''), 80) . ' ' . cleanText((string)($user['last_name'] ?? ''), 80));
     $username = isset($user['username']) ? cleanText((string)$user['username'], 80) : '';
+    $roll = (string)$profile['roll_number'];
     $code = ticketCode();
     $now = gmdate('Y-m-d\TH:i:s\Z');
     ddb()->putItem([
@@ -202,6 +225,7 @@ function handleTelegramMessage(array $m): void {
             'user_chat_id' => $chatId,
             'user_name' => $name,
             'username' => $username,
+            'roll_number' => $roll,
             'message' => $body,
             'status' => 'open',
             'created_at' => $now
@@ -209,9 +233,9 @@ function handleTelegramMessage(array $m): void {
         'ConditionExpression' => 'attribute_not_exists(ticket_code)'
     ]);
     addReply($code, 'user', $body);
-    $adminText = "📩 NEW BITSRESOURCES SUPPORT TICKET\n\nTicket: {$code}\nFrom: " . ($name ?: 'Telegram user') . "\nUsername: " . ($username !== '' ? '@' . $username : '(none)') . "\nUser ID: {$chatId}\n\nMessage:\n{$body}\n\nReply:\n/reply {$code} Your message here\n\nClose:\n/close {$code}";
+    $adminText = "📩 NEW BITSRESOURCES SUPPORT TICKET\n\nRoll number: {$roll}\nDate: {$now}\nStatus: OPEN\nTicket reference: {$code}\nFrom: " . ($name ?: 'Telegram user') . "\nUsername: " . ($username !== '' ? '@' . $username : '(none)') . "\n\nMessage:\n{$body}\n\nReply:\n/reply {$code} Your message here\n\nClose:\n/close {$code}";
     $adminResult = sendText(envRequired('ADMIN_TELEGRAM_ID'), $adminText);
-    sendText($chatId, "✅ Your support request has been received!\n\nTicket ID: {$code}\n\n" . (empty($adminResult['ok']) ? 'Your request was saved, but admin notification may be delayed.' : 'The admin has been notified.') . "\n\nYou'll receive a reply here.\n/status {$code}");
+    sendText($chatId, "✅ Your support request has been received!\n\nRoll number: {$roll}\nDate: {$now}\nStatus: OPEN\nReference: {$code}\n\n" . (empty($adminResult['ok']) ? 'Your request was saved, but admin notification may be delayed.' : 'The admin has been notified.') . "\n\nYou'll receive a reply here.\n/status {$code}");
 }
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
