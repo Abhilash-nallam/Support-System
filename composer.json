@@ -1,0 +1,14 @@
+{
+  "name": "abhilash-nallam/support-system-aws",
+  "description": "Low-cost AWS Lambda and DynamoDB Telegram support bot",
+  "type": "project",
+  "require": {
+    "php": ">=8.2",
+    "aws/aws-sdk-php": "^3.300",
+    "bref/bref": "^2.4"
+  },
+  "config": {
+    "optimize-autoloader": true,
+    "sort-packages": true
+  }
+}
