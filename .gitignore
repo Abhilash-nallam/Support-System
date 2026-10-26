@@ -1,1 +1,8 @@
-config.php\n*.log\n
+config.php
+*.log
+/.env
+/.env.*
+/vendor/
+/node_modules/
+.phpunit.cache/
+/.serverless/
