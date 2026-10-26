@@ -52,7 +52,9 @@ package:
 functions:
   api:
     handler: public/index.php
-    url: true
+    url:
+      authorizer: none
+      cors: false
 
 resources:
   Resources:
