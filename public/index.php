@@ -185,7 +185,7 @@ function handleTelegramMessage(array $m): void {
         sendText($chatId, "🗂 LATEST SUPPORT TICKETS (newest first)\n\n" . implode("\n\n────────────\n\n", $out));
         return;
     }
-    if (preg_match('/^\/reply(?:@\w+)?\s+(BR-\d{8}-[A-F0-9]{6})\s+([\s\S]+)$/i', $text, $x)) {
+    if (preg_match('/^\/reply(?:@\w+)?\s+((?:BR-\d{8}-[A-F0-9]{6})|[A-Z0-9]{8,12})\s+([\s\S]+)$/i', $text, $x)) {
         if (!isAdmin($fromId, $chatType)) { sendText($chatId, 'Admin only command.'); return; }
         $code = strtoupper($x[1]);
         $reply = cleanText(trim($x[2]));
@@ -203,7 +203,7 @@ function handleTelegramMessage(array $m): void {
         sendText($chatId, "✅ Reply sent to {$code}.");
         return;
     }
-    if (preg_match('/^\/close(?:@\w+)?\s+(BR-\d{8}-[A-F0-9]{6})$/i', $text, $x)) {
+    if (preg_match('/^\/close(?:@\w+)?\s+((?:BR-\d{8}-[A-F0-9]{6})|[A-Z0-9]{8,12})$/i', $text, $x)) {
         if (!isAdmin($fromId, $chatType)) { sendText($chatId, 'Admin only command.'); return; }
         $code = strtoupper($x[1]);
         $ticket = getTicket($code);
@@ -218,7 +218,7 @@ function handleTelegramMessage(array $m): void {
         sendText($chatId, '✅ Ticket closed.');
         return;
     }
-    if (preg_match('/^\/status(?:@\w+)?\s+(BR-\d{8}-[A-F0-9]{6})$/i', $text, $x)) {
+    if (preg_match('/^\/status(?:@\w+)?\s+((?:BR-\d{8}-[A-F0-9]{6})|[A-Z0-9]{8,12})$/i', $text, $x)) {
         $code = strtoupper($x[1]);
         $ticket = getTicket($code);
         if (!$ticket || (string)$ticket['user_chat_id'] !== $chatId) { sendText($chatId, 'Ticket not found for your Telegram account.'); return; }
@@ -249,6 +249,10 @@ function handleTelegramMessage(array $m): void {
     $code = $roll;
     $now = nowIst();
     $existing = getTicket($code);
+    if ($existing && (string)($existing['user_chat_id'] ?? '') !== $chatId) {
+        sendText($chatId, 'This roll number is already linked to another Telegram account. Please contact BitsResources support to verify ownership.');
+        return;
+    }
     if ($existing) {
         $combined = rtrim((string)($existing['message'] ?? ''));
         $combined .= "\n\n[" . $now . "] Student: " . $body;
