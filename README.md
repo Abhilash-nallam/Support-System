@@ -1,32 +1,105 @@
-# BitsResources Telegram Support — PHP + InfinityFree
+# BitsResources Telegram Support System
 
-PHP webhook backend + InfinityFree MySQL. No Node.js and no Supabase.
+A PHP Telegram support bot for BitsResources, deployed on **AWS Lambda + DynamoDB**. Students contact support through Telegram; the admin can view conversations, reply, and close support records.
 
-## Important host limitation
-Telegram calls `webhook.php` inbound, but PHP must call `api.telegram.org` outbound to send messages and register the webhook. Some free hosts restrict outbound HTTPS. This package uses PHP cURL; if cURL cannot reach Telegram, the account cannot run the whole bot directly and needs a Cloudflare Worker relay or a host allowing Telegram API access. Verify this before relying on the bot.
+> **Deployment branch:** `aws-lambda-dynamodb`  
+> **AWS region:** Mumbai (`ap-south-1`)  
+> **Detailed AWS setup:** See [README-AWS.md](README-AWS.md).
 
-## Setup
-1. Create a bot with @BotFather. Copy its token. Get your numeric user ID from @userinfobot. Press Start on your new bot as admin.
-2. In InfinityFree control panel, create a MySQL database. Use the exact host/name/user/password shown there.
-3. Import `schema.sql` in phpMyAdmin.
-4. Rename `config.example.php` to `config.php` and fill in token, username, admin ID, webhook secret (long random string), and MySQL credentials. Never commit `config.php`.
-5. Upload `config.php`, `db.php`, `telegram.php`, `webhook.php`, `health.php`, and `set-webhook.php` to the same folder on your HTTPS site. Upload the widget snippet wherever you keep frontend assets.
-6. Edit `set-webhook.php`: change `$setup_key` to another long random secret.
-7. Visit `https://YOURDOMAIN/support/set-webhook.php?key=YOUR_SETUP_KEY` (adjust path). Confirm Telegram returns `ok:true`. Delete `set-webhook.php` immediately after successful setup.
-8. Visit `/health.php`; it should return `ok:true`.
-9. Replace `YOUR_SUPPORT_BOT` in `public/bitsresources-telegram-widget.html` and paste that snippet before `</body>` in BitsResources shared footer.
+## Features
 
-## Commands
-Admin:
-- `/tickets` — list up to 20 open tickets
-- `/reply BR-YYYYMMDD-ABC123 Your reply here` — reply to user
-- `/close BR-YYYYMMDD-ABC123` — close ticket
+- Telegram webhook handled by PHP on AWS Lambda (Bref runtime).
+- DynamoDB stores student profiles, support conversations, and replies.
+- Students register their roll number before sending a support issue.
+- Messages from the same roll number are combined into one conversation.
+- Admin-only commands to list conversations, reply, and close them.
+- Webhook requests are validated with Telegram's secret-token header.
+- GitHub Actions deploys through AWS OIDC; no long-lived AWS access key is required.
 
-User:
-- `/start`, `/help`
-- `/status BR-YYYYMMDD-ABC123` — check own ticket
+## How it works
 
-Users must press Start before the bot can message them. This version handles text messages only. Each normal user text message creates a separate ticket.
+1. A student opens the bot and sends `/start`.
+2. The student sends their roll number when prompted.
+3. The student sends a support message. The bot records it and notifies the admin.
+4. Further messages from that roll number are added to the same conversation.
+5. The admin replies from Telegram; the student receives the reply in the bot chat.
 
-## Security
-Keep `config.php` private. Never expose bot token or database password. Use HTTPS and a long webhook secret. The webhook checks Telegram's `X-Telegram-Bot-Api-Secret-Token` header. Delete `set-webhook.php` after setup. If credentials leak, rotate them immediately.
+**Current ticket identifier:** the student's roll number. This implementation does not create a separate random ticket ID for every message.
+
+## Requirements
+
+- A Telegram bot created with [@BotFather](https://t.me/BotFather).
+- An AWS account with permission to create/deploy Lambda, DynamoDB, CloudFormation, IAM roles, and CloudWatch Logs resources.
+- A GitHub repository with Actions enabled.
+- An AWS IAM role configured for GitHub Actions OIDC.
+- PHP 8.4-compatible Bref runtime and the dependencies declared in `composer.json` (installed by the workflow).
+
+## Quick setup
+
+For a full, step-by-step guide—including the OIDC trust policy and deployment details—follow **[README-AWS.md](README-AWS.md)**. In summary:
+
+1. Fork or clone this repository.
+2. Configure an AWS IAM OIDC identity provider and a role restricted to your own repository and deployment branch.
+3. Add the required repository secrets under **Settings → Secrets and variables → Actions**:
+   - `AWS_ROLE_ARN`
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_WEBHOOK_SECRET`
+   - `ADMIN_TELEGRAM_ID`
+4. Review the IAM permissions and AWS costs before deploying.
+5. Push your reviewed changes to your deployment branch or manually run **Deploy Telegram Support Bot to AWS** from the Actions tab.
+6. Test the bot with a separate student Telegram account.
+
+Do not copy the example OIDC trust policy unchanged: replace the repository and branch subject with your own values. Never put real tokens, passwords, or AWS credentials in source files.
+
+## Telegram commands
+
+### Students
+
+| Command | Purpose |
+| --- | --- |
+| `/start` | Start the bot and see the next step |
+| `/help` | Show usage guidance |
+| `/change_roll` | Reset the saved roll number and register again |
+| `/status ROLL_NUMBER` | Check the conversation status for the registered roll number |
+
+### Admin
+
+| Command | Purpose |
+| --- | --- |
+| `/tickets` | Show recent conversations |
+| `/reply ROLL_NUMBER Your reply` | Send a reply to that student's Telegram chat |
+| `/close ROLL_NUMBER` | Close the conversation |
+
+Use the student's actual roll number in admin commands. The bot only accepts admin commands from the configured admin Telegram ID in a private chat.
+
+## Repository layout
+
+- `public/index.php` — AWS Lambda webhook and support-bot logic.
+- `serverless.yml` — Lambda, Function URL, DynamoDB tables, and runtime configuration.
+- `.github/workflows/deploy-aws.yml` — GitHub Actions deployment workflow.
+- `scripts/register-webhook.php` — registers the deployed Lambda Function URL with Telegram.
+- `composer.json` — PHP dependencies.
+- `README-AWS.md` — detailed AWS deployment and IAM setup.
+- `webhook.php`, `db.php`, `telegram.php`, `schema.sql`, and related files — earlier PHP/MySQL hosting version retained for reference; they are not the AWS Lambda handler.
+
+## Security notes
+
+- Keep all real credentials in GitHub Actions secrets or the relevant hosting provider's secret store.
+- Never commit a real bot token, webhook secret, database password, or AWS access key.
+- Restrict the GitHub OIDC trust policy to your own repository and branch.
+- Do not print secrets in workflow logs.
+- If a credential has ever been committed or exposed, rotate it; deleting the file alone does not remove it from Git history.
+- Protect the bot from unauthorized webhook calls by keeping the webhook secret private.
+- Avoid sending student passwords, OTPs, or other sensitive information through support messages.
+
+## Costs and data
+
+AWS usage may incur charges depending on current pricing, account eligibility, and usage. Configure a billing budget/alert before deploying. DynamoDB data may be deleted if the CloudFormation stack or tables are deleted; back up data before removing resources.
+
+## Contributing
+
+Fork the repository, make changes on a separate branch, and test them with a test bot and AWS resources before deploying to a live bot. Do not test destructive infrastructure changes against production data.
+
+## License
+
+See [LICENSE](LICENSE).
