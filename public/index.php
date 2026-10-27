@@ -128,7 +128,7 @@ function getTicket(string $code): ?array {
 }
 
 function addReply(string $code, string $sender, string $message): void {
-    $now = gmdate('Y-m-d\TH:i:s\Z');
+    $now = nowIst();
     ddb()->putItem([
         'TableName' => repliesTable(),
         'Item' => marshaler()->marshalItem([
@@ -198,7 +198,7 @@ function handleTelegramMessage(array $m): void {
             'TableName' => ticketsTable(),
             'Key' => ['ticket_code' => ['S' => $code]],
             'UpdateExpression' => 'SET replied_at = :time',
-            'ExpressionAttributeValues' => [':time' => ['S' => gmdate('Y-m-d\TH:i:s\Z')]]
+            'ExpressionAttributeValues' => [':time' => ['S' => nowIst()]]
         ]);
         sendText($chatId, "✅ Reply sent to {$code}.");
         return;
@@ -213,7 +213,7 @@ function handleTelegramMessage(array $m): void {
             'Key' => ['ticket_code' => ['S' => $code]],
             'UpdateExpression' => 'SET #st = :closed, closed_at = :time',
             'ExpressionAttributeNames' => ['#st' => 'status'],
-            'ExpressionAttributeValues' => [':closed' => ['S' => 'closed'], ':time' => ['S' => gmdate('Y-m-d\TH:i:s\Z')]]
+            'ExpressionAttributeValues' => [':closed' => ['S' => 'closed'], ':time' => ['S' => nowIst()]]
         ]);
         sendText($chatId, '✅ Ticket closed.');
         return;
