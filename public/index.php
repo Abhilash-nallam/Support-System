@@ -116,8 +116,6 @@ function isAdmin(string $from, string $chatType): bool {
 function nowIst(): string {
     return (new DateTimeImmutable('now', new DateTimeZone('Asia/Kolkata')))->format('Y-m-d H:i:s') . ' IST';
 }
-function ticketCode(): string { return ''; }
-
 function getTicket(string $code): ?array {
     $result = ddb()->getItem([
         'TableName' => ticketsTable(),
@@ -191,7 +189,7 @@ function handleTelegramMessage(array $m): void {
         $reply = cleanText(trim($x[2]));
         $ticket = getTicket($code);
         if (!$ticket) { sendText($chatId, 'Ticket not found.'); return; }
-        $sent = sendText((string)$ticket['user_chat_id'], "👨‍💼 Reply from Human:\n\n{$reply}");
+        $sent = sendText((string)$ticket['user_chat_id'], $reply);
         if (empty($sent['ok'])) { sendText($chatId, '❌ Reply failed. The user may not have started the bot or may have blocked it.'); return; }
         addReply($code, 'admin', $reply);
         ddb()->updateItem([
@@ -288,6 +286,10 @@ function handleTelegramMessage(array $m): void {
     addReply($code, 'user', $body);
     $adminText = "📩 BITSRESOURCES SUPPORT MESSAGE\n\nRoll / Ticket ID: {$roll}\nTelegram user ID: {$fromId}\nDate/time: {$now}\nStatus: OPEN\nFrom: " . ($name ?: 'Telegram user') . "\nUsername: " . ($username !== '' ? '@' . $username : '(none)') . "\n\nLatest message:\n{$body}\n\nReply to the combined conversation:\n/reply {$roll} Your reply here\n\nClose ticket:\n/close {$roll}\n\nUse /tickets to view the full conversation.";
     $adminResult = sendText(envRequired('ADMIN_TELEGRAM_ID'), $adminText);
+    if (empty($adminResult['ok'])) {
+        sendText($chatId, "✅ Your message was saved to your support ticket.\n\nRoll / Ticket ID: {$roll}\nDate/time: {$now}\nStatus: OPEN\n\nThe admin notification may be delayed. You can check this ticket again with /status {$roll}.");
+        return;
+    }
     sendText($chatId, "✅ Message added to your support ticket.\n\nRoll / Ticket ID: {$roll}\nDate/time: {$now}\nStatus: OPEN\nYour messages are combined under this roll number.\nYou'll receive the reply here.");
 }
 
