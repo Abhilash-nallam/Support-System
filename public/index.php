@@ -180,7 +180,7 @@ function handleTelegramMessage(array $m): void {
         if (!$rows) { sendText($chatId, 'No tickets yet.'); return; }
         $out = [];
         foreach ($rows as $r) {
-            $out[] = "Roll: " . ($r['roll_number'] ?? 'Not recorded') . "\nDate: " . ($r['created_at'] ?? 'Unknown') . "\nStatus: " . strtoupper((string)($r['status'] ?? 'unknown')) . "\nTicket: " . $r['ticket_code'] . "\n" . cleanText((string)$r['message'], 180);
+            $out[] = "Roll / Ticket ID: " . ($r['roll_number'] ?? $r['ticket_code'] ?? 'Not recorded') . "\nTelegram ID: " . ($r['telegram_user_id'] ?? $r['user_chat_id'] ?? 'Unknown') . "\nDate/time: " . ($r['updated_at'] ?? $r['created_at'] ?? 'Unknown') . "\nStatus: " . strtoupper((string)($r['status'] ?? 'unknown')) . "\nConversation:\n" . cleanText((string)$r['message'], 900);
         }
         sendText($chatId, "🗂 LATEST SUPPORT TICKETS (newest first)\n\n" . implode("\n\n────────────\n\n", $out));
         return;
@@ -191,7 +191,7 @@ function handleTelegramMessage(array $m): void {
         $reply = cleanText(trim($x[2]));
         $ticket = getTicket($code);
         if (!$ticket) { sendText($chatId, 'Ticket not found.'); return; }
-        $sent = sendText((string)$ticket['user_chat_id'], "💬 Reply from BitsResources Support\n\nTicket: {$code}\n\n{$reply}");
+        $sent = sendText((string)$ticket['user_chat_id'], "💬 Reply from BitsResources Support\n\nRoll / Ticket ID: {$code}\n\n{$reply}");
         if (empty($sent['ok'])) { sendText($chatId, '❌ Reply failed. The user may not have started the bot or may have blocked it.'); return; }
         addReply($code, 'admin', $reply);
         ddb()->updateItem([
