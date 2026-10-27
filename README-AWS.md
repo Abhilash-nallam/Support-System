@@ -1,44 +1,58 @@
-# AWS deployment: Telegram Support Bot (PHP + Lambda + DynamoDB)
+# AWS Deployment Guide — Telegram Support System
 
-This branch adds an AWS version of the existing PHP Telegram support bot. Existing InfinityFree files and the original README remain unchanged.
+This guide deploys the **AWS Lambda + DynamoDB** version of the BitsResources Telegram support bot from the `aws-lambda-dynamodb` branch.
 
-## Architecture
+- **Runtime:** Bref PHP 8.4 FPM on AWS Lambda (ARM64).
+- **Endpoint:** Lambda Function URL; API Gateway is not used.
+- **Database:** DynamoDB tables for support conversations, replies, and student profiles.
+- **Region:** Mumbai (`ap-south-1`).
+- **Deployment:** GitHub Actions using OpenID Connect (OIDC), not long-lived AWS access keys.
 
-- AWS Lambda with Bref PHP 8.4 FPM runtime, ARM64, 256 MB memory.
-- Lambda Function URL (no API Gateway).
-- DynamoDB stores tickets and replies; no always-running RDS instance.
-- GitHub Actions deploys this branch using AWS OIDC; no long-lived AWS access keys are needed.
-- Region: Mumbai (`ap-south-1`).
+The older PHP/MySQL hosting files remain in the repository for reference. The AWS handler is `public/index.php`.
 
-## Cost and data
+## Before you begin
 
-DynamoDB tables use provisioned capacity at 5 read and 5 write units each to keep a small low-volume bot predictable. Check the Free Tier/credits and current regional pricing before deployment. Lambda, DynamoDB, CloudWatch Logs, internet data transfer and other services may incur costs beyond allowances. Set a billing budget/alert first. AWS Free Plan access is time-limited and is not permanent free hosting.
+You need:
+- A Telegram bot token from [@BotFather](https://t.me/BotFather).
+- Your numeric Telegram user ID for the admin account.
+- An AWS account with permission to create the required deployment resources.
+- A GitHub repository with Actions enabled.
 
-Tickets and replies are stored only in DynamoDB. Deleting the CloudFormation stack can delete the tables and their data. Export/back up data before deleting resources.
+Review AWS pricing and create a billing budget/alert before deploying. DynamoDB provisioned capacity, Lambda, CloudWatch Logs, and other services can incur charges. Free-tier and promotional eligibility can change and should not be assumed permanent.
 
-## GitHub repository secrets
+## 1. Configure GitHub repository secrets
 
-On the repository, open Settings → Secrets and variables → Actions and add:
+Open **Settings → Secrets and variables → Actions → New repository secret** and create:
 
-- `AWS_ROLE_ARN`: ARN of an IAM role configured for GitHub OIDC and restricted to this repository and this branch.
-- `TELEGRAM_BOT_TOKEN`: bot token from BotFather. If it was exposed, revoke it and use a replacement.
-- `TELEGRAM_WEBHOOK_SECRET`: random 32–64 character secret using only letters, digits, underscore or hyphen.
-- `ADMIN_TELEGRAM_ID`: numeric Telegram user ID, stored as text.
+| Secret | Value |
+| --- | --- |
+| `AWS_ROLE_ARN` | ARN of the IAM role GitHub Actions will assume through OIDC |
+| `TELEGRAM_BOT_TOKEN` | Token from BotFather |
+| `TELEGRAM_WEBHOOK_SECRET` | Random secret using only letters, numbers, underscores, or hyphens |
+| `ADMIN_TELEGRAM_ID` | Your numeric Telegram user ID, stored as text |
 
-Never commit secrets into files.
+Do not paste these values into source files or commit them. GitHub Actions secrets are available to workflows, not automatically to unrelated hosting services.
 
-## IAM role setup
+## 2. Configure GitHub OIDC in AWS
 
-1. In AWS IAM → Identity providers, add `https://token.actions.githubusercontent.com` as an OpenID Connect provider with audience `sts.amazonaws.com` if it does not already exist.
-2. Create an IAM role for Web identity using that provider.
-3. Restrict the trust policy to this repo and branch. Replace `YOUR_ACCOUNT_ID` with your 12-digit AWS account ID:
+1. In **AWS IAM → Identity providers**, add `https://token.actions.githubusercontent.com` if it does not already exist. The audience must be `sts.amazonaws.com`.
+2. Create an IAM role for web identity using that provider.
+3. Restrict the role trust policy to your own repository and deployment branch. For this repository, the subject is:
+
+```text
+repo:Abhilash-nallam/Support-System:ref:refs/heads/aws-lambda-dynamodb
+```
+
+Example trust policy (replace `YOUR_ACCOUNT_ID` with your 12-digit AWS account ID):
 
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [{
     "Effect": "Allow",
-    "Principal": {"Federated": "arn:aws:iam::YOUR_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"},
+    "Principal": {
+      "Federated": "arn:aws:iam::YOUR_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+    },
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {
       "StringEquals": {
@@ -50,22 +64,64 @@ Never commit secrets into files.
 }
 ```
 
-The role also needs deployment permissions for CloudFormation, Lambda, IAM execution roles/policies, CloudWatch Logs, and DynamoDB. Avoid permanently granting unrestricted AdministratorAccess. Review the required permissions before deploying.
+The role also needs the permissions required for the Serverless Framework to deploy CloudFormation, Lambda, IAM execution roles/policies, CloudWatch Logs, and DynamoDB resources. Use least privilege where practical; avoid leaving unrestricted `AdministratorAccess` attached permanently. If you fork the project, change the repository and branch in the trust policy.
 
-## Deploy
+## 3. Deploy
 
-1. Add the four GitHub secrets.
-2. Push a commit to branch `aws-lambda-dynamodb` or manually run the workflow from GitHub Actions.
-3. Open Actions → **Deploy Telegram Support Bot to AWS** and review logs.
-4. The workflow deploys Lambda and DynamoDB, then registers the Lambda Function URL as the Telegram webhook.
-5. Test `/start`, submit a ticket from a second Telegram account, then test admin `/tickets`, `/reply TICKET_ID message`, and `/close TICKET_ID`.
+1. Confirm the four repository secrets and OIDC role are correct.
+2. Push a reviewed code change to `aws-lambda-dynamodb`, or open **Actions → Deploy Telegram Support Bot to AWS → Run workflow**.
+3. Inspect the workflow logs and confirm the deploy and webhook-registration steps succeed.
+4. The workflow deploys Lambda/DynamoDB and registers the resulting Lambda Function URL with Telegram.
 
-Do not deploy until the OIDC role and secrets are configured.
+The workflow currently runs on pushes to `aws-lambda-dynamodb` and can also be started manually. Documentation-only changes to `README.md` and `README-AWS.md` are ignored by the push trigger.
 
-## Existing bot behavior
+## 4. Verify the bot
 
-- Text messages from users create tickets.
-- Admin commands: `/tickets`, `/reply BR-YYYYMMDD-ABC123 message`, `/close BR-YYYYMMDD-ABC123`.
-- Users can use `/status BR-YYYYMMDD-ABC123`; the bot verifies ticket ownership by Telegram chat ID.
-- The webhook validates Telegram's `X-Telegram-Bot-Api-Secret-Token` header.
-- Text messages only; each user text message creates a separate ticket.
+Use a separate Telegram account to test the student flow:
+
+1. Send `/start`.
+2. Enter the student's roll number when prompted.
+3. Send a test support message.
+4. Send another message and verify it is added to the same roll-number conversation.
+5. From the configured admin account, test `/tickets`, `/reply ROLL_NUMBER Your reply`, and `/close ROLL_NUMBER`.
+6. As the student, test `/status ROLL_NUMBER`.
+
+Do not test with real student data until you have verified the flow.
+
+## Commands and current behavior
+
+**Student commands**
+- `/start` — start the bot.
+- `/help` — usage guidance.
+- `/change_roll` — clear the saved roll number and register again.
+- `/status ROLL_NUMBER` — check the status for that roll number.
+
+**Admin commands** (private chat from the configured admin Telegram ID only)
+- `/tickets` — list recent conversations.
+- `/reply ROLL_NUMBER Your reply` — send a reply to the student's Telegram chat.
+- `/close ROLL_NUMBER` — close the conversation.
+
+The current AWS implementation uses the student's roll number as the conversation key. Messages from that roll number are combined in one conversation; it does not issue a unique random ticket ID for each message. The bot accepts text messages. Students must start the bot before Telegram can deliver bot messages to them.
+
+## Troubleshooting
+
+- **GitHub Actions cannot assume the role:** Check `AWS_ROLE_ARN`, the OIDC provider audience, and the trust policy's exact repository/branch subject.
+- **Deployment fails:** Read the first failing workflow step. Check IAM permissions and the configured AWS region.
+- **Telegram webhook registration fails:** Check `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and that the deployed Function URL is HTTPS.
+- **Function URL returns 403:** Review the Lambda Function URL auth setting and Lambda resource-based permissions for URL invocation. Keep Telegram's webhook secret validation enabled; do not disable webhook validation to work around permission errors.
+- **Bot receives updates but cannot send replies:** Check CloudWatch Logs for Telegram API errors and confirm the bot token is valid and the user has started the bot.
+- **Bot stops responding:** Check the Lambda logs, Telegram webhook status, workflow outcome, and AWS service/billing status.
+
+Never share bot tokens, webhook secrets, or complete secret-bearing logs publicly.
+
+## Data and deletion warning
+
+The Serverless stack manages DynamoDB tables for conversations, replies, and student profiles. **Deleting the stack or tables may permanently delete support data.** Back up/export the tables before removing infrastructure.
+
+## Security checklist
+
+- Store secrets in GitHub Actions secrets and AWS secret/environment configuration as appropriate.
+- Never commit a real token, password, webhook secret, or AWS access key.
+- Keep the OIDC trust policy restricted to your own repository and branch.
+- Rotate credentials immediately if they are exposed; removing a value from the latest file does not remove it from Git history.
+- Do not log or expose student data unnecessarily.
