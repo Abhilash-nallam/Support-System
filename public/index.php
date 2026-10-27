@@ -191,7 +191,7 @@ function handleTelegramMessage(array $m): void {
         $reply = cleanText(trim($x[2]));
         $ticket = getTicket($code);
         if (!$ticket) { sendText($chatId, 'Ticket not found.'); return; }
-        $sent = sendText((string)$ticket['user_chat_id'], "💬 Reply from BitsResources Support\n\nRoll / Ticket ID: {$code}\n\n{$reply}");
+        $sent = sendText((string)$ticket['user_chat_id'], "👨‍💼 Reply from Human Support\n\n{$reply}");
         if (empty($sent['ok'])) { sendText($chatId, '❌ Reply failed. The user may not have started the bot or may have blocked it.'); return; }
         addReply($code, 'admin', $reply);
         ddb()->updateItem([
