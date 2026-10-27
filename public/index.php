@@ -54,7 +54,7 @@ function getUserProfile(string $chatId): ?array {
 }
 
 function saveUserProfile(string $chatId, string $rollNumber, array $user): void {
-    $now = gmdate('Y-m-d\\TH:i:s\\Z');
+    $now = nowIst();
     ddb()->putItem([
         'TableName' => usersTable(),
         'Item' => marshaler()->marshalItem([
@@ -113,7 +113,10 @@ function isAdmin(string $from, string $chatType): bool {
     return $chatType === 'private' && hash_equals(envRequired('ADMIN_TELEGRAM_ID'), $from);
 }
 
-function ticketCode(): string { return 'BR-' . gmdate('Ymd') . '-' . strtoupper(bin2hex(random_bytes(3))); }
+function nowIst(): string {
+    return (new DateTimeImmutable('now', new DateTimeZone('Asia/Kolkata')))->format('Y-m-d H:i:s') . ' IST';
+}
+function ticketCode(): string { return ''; }
 
 function getTicket(string $code): ?array {
     $result = ddb()->getItem([
@@ -219,7 +222,7 @@ function handleTelegramMessage(array $m): void {
         $code = strtoupper($x[1]);
         $ticket = getTicket($code);
         if (!$ticket || (string)$ticket['user_chat_id'] !== $chatId) { sendText($chatId, 'Ticket not found for your Telegram account.'); return; }
-        sendText($chatId, "Ticket: {$ticket['ticket_code']}\nStatus: {$ticket['status']}\nCreated: {$ticket['created_at']} UTC\nLast reply: " . ($ticket['replied_at'] ?? 'Waiting for admin reply'));
+        sendText($chatId, "Roll / Ticket ID: {$ticket['ticket_code']}\nStatus: {$ticket['status']}\nCreated: {$ticket['created_at']}\nLast reply: " . ($ticket['replied_at'] ?? 'Waiting for admin reply'));
         return;
     }
     if (isAdmin($fromId, $chatType)) {
@@ -243,26 +246,45 @@ function handleTelegramMessage(array $m): void {
     $name = trim(cleanText((string)($user['first_name'] ?? ''), 80) . ' ' . cleanText((string)($user['last_name'] ?? ''), 80));
     $username = isset($user['username']) ? cleanText((string)$user['username'], 80) : '';
     $roll = (string)$profile['roll_number'];
-    $code = ticketCode();
-    $now = gmdate('Y-m-d\TH:i:s\Z');
-    ddb()->putItem([
-        'TableName' => ticketsTable(),
-        'Item' => marshaler()->marshalItem([
-            'ticket_code' => $code,
-            'user_chat_id' => $chatId,
-            'user_name' => $name,
-            'username' => $username,
-            'roll_number' => $roll,
-            'message' => $body,
-            'status' => 'open',
-            'created_at' => $now
-        ]),
-        'ConditionExpression' => 'attribute_not_exists(ticket_code)'
-    ]);
+    $code = $roll;
+    $now = nowIst();
+    $existing = getTicket($code);
+    if ($existing) {
+        $combined = rtrim((string)($existing['message'] ?? ''));
+        $combined .= "\n\n[" . $now . "] Student: " . $body;
+        ddb()->updateItem([
+            'TableName' => ticketsTable(),
+            'Key' => ['ticket_code' => ['S' => $code]],
+            'UpdateExpression' => 'SET #msg = :msg, updated_at = :now, #st = :open',
+            'ExpressionAttributeNames' => ['#msg' => 'message', '#st' => 'status'],
+            'ExpressionAttributeValues' => [
+                ':msg' => ['S' => cleanText($combined, 30000)],
+                ':now' => ['S' => $now],
+                ':open' => ['S' => 'open']
+            ]
+        ]);
+    } else {
+        ddb()->putItem([
+            'TableName' => ticketsTable(),
+            'Item' => marshaler()->marshalItem([
+                'ticket_code' => $code,
+                'user_chat_id' => $chatId,
+                'telegram_user_id' => $fromId,
+                'user_name' => $name,
+                'username' => $username,
+                'roll_number' => $roll,
+                'message' => '[' . $now . '] Student: ' . $body,
+                'status' => 'open',
+                'created_at' => $now,
+                'updated_at' => $now
+            ]),
+            'ConditionExpression' => 'attribute_not_exists(ticket_code)'
+        ]);
+    }
     addReply($code, 'user', $body);
-    $adminText = "📩 NEW BITSRESOURCES SUPPORT TICKET\n\nRoll number: {$roll}\nDate: {$now}\nStatus: OPEN\nTicket reference: {$code}\nFrom: " . ($name ?: 'Telegram user') . "\nUsername: " . ($username !== '' ? '@' . $username : '(none)') . "\n\nMessage:\n{$body}\n\nReply:\n/reply {$code} Your message here\n\nClose:\n/close {$code}";
+    $adminText = "📩 BITSRESOURCES SUPPORT MESSAGE\n\nRoll / Ticket ID: {$roll}\nTelegram user ID: {$fromId}\nDate/time: {$now}\nStatus: OPEN\nFrom: " . ($name ?: 'Telegram user') . "\nUsername: " . ($username !== '' ? '@' . $username : '(none)') . "\n\nLatest message:\n{$body}\n\nReply to the combined conversation:\n/reply {$roll} Your reply here\n\nClose ticket:\n/close {$roll}\n\nUse /tickets to view the full conversation.";
     $adminResult = sendText(envRequired('ADMIN_TELEGRAM_ID'), $adminText);
-    sendText($chatId, "✅ Your support request has been received!\n\nRoll number: {$roll}\nDate: {$now}\nStatus: OPEN\nReference: {$code}\n\n" . (empty($adminResult['ok']) ? 'Your request was saved, but admin notification may be delayed.' : 'The admin has been notified.') . "\n\nYou'll receive a reply here.\n/status {$code}");
+    sendText($chatId, "✅ Message added to your support ticket.\n\nRoll / Ticket ID: {$roll}\nDate/time: {$now}\nStatus: OPEN\nYour messages are combined under this roll number.\nYou'll receive the reply here.");
 }
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
